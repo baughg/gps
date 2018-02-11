@@ -37,7 +37,7 @@ typedef struct date_time_rev {
 	unsigned sec : 6;
 }date_time_rev;
 
-uint8_t decode_packet(std::vector<uint8_t> &packet);
+uint8_t decode_packet(std::vector<uint8_t> &packet, std::vector<uint8_t> &decoder);
 void decode_packet_bruteforce(std::vector<uint8_t> &buffer);
 
 size_t offset = 0;
@@ -73,15 +73,21 @@ int main(int argc, char** argv)
 	}
 
 	std::vector<uint8_t> packet;
+	std::vector<uint8_t> decoded;
 	packet.reserve(64);
+	decoded.reserve(64);
 
 	int state = -1;
 	int payload_size = 0;
 	FILE* clean_file = NULL;
+	FILE* decoded_file = NULL;
 	std::string all_filename(argv[1]);
+	std::string decoded_filename(argv[1]);
+	decoded_filename.append("decoded.gps");
 	all_filename.append(".gps");
 
 	fopen_s(&clean_file, all_filename.c_str(), "wb");
+	fopen_s(&decoded_file, decoded_filename.c_str(), "wb");
 
 	for (size_t b = 0; b < file_size; ++b)
 	{
@@ -110,11 +116,13 @@ int main(int argc, char** argv)
 		else if (!payload_size)
 		{
 			if (packet.size() == 64) {
-				uint8_t mask = decode_packet(packet);
+				uint8_t mask = decode_packet(packet, decoded);
 				fwrite(&packet[0], 1, packet.size(), clean_file);
 				fwrite(&mask, 1, 1, clean_file);
 				mask -= packet[51];
 				fwrite(&mask, 1, 1, clean_file);
+
+				fwrite(&decoded[0], 1, decoded.size(), decoded_file);
 			}
 			else
 				printf("PACKET SIZE: %llu\n", packet.size());
@@ -149,12 +157,13 @@ BYTE 17-18 (CS): checksum, calculated the same way as for uBlox binary messages*
 	}
 
 	fclose(clean_file);
+	fclose(decoded_file);
 	return 0;
 }
 
 unsigned seq_no = 0;
 
-uint8_t decode_packet(std::vector<uint8_t> &buffer)
+uint8_t decode_packet(std::vector<uint8_t> &buffer, std::vector<uint8_t> &decoder)
 {
 	uint32_t* p_packet = (uint32_t*)&buffer[0];
 	uint8_t* p_packet_byte = (uint8_t*)&buffer[0];
@@ -197,14 +206,21 @@ uint8_t decode_packet(std::vector<uint8_t> &buffer)
 	if (mask != buffer[51])
 	{
 		printf("NO! calc mask = 0x%.2X NOT P[51]=0x%.2X\n", mask, buffer[51]);
-		//mask = buffer[51];
+		mask = buffer[51];
 	}
 
-	std::vector<uint8_t> decoder(buffer.size());
+	decoder.resize(buffer.size());
+	decoder[0] = buffer[0];
+	decoder[1] = buffer[1];
+	decoder[2] = buffer[2];
+	decoder[3] = buffer[3];
 
-	for (size_t b = 0; b < decoder.size(); ++b)
+	for (size_t b = 4; b < decoder.size(); ++b)
 	{
-		decoder[b] = buffer[b] ^ mask;
+		if (b != 52 && b != 60 && b != 61)
+			decoder[b] = buffer[b] ^ mask;
+		else
+			decoder[b] = buffer[b];
 	}
 
 	uint32_t * p_decoded = (uint32_t*)&decoder[0];
